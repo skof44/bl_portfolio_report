@@ -2,10 +2,6 @@
 Production Streamlit-отчет для дипломной работы:
 "Модель Блэка-Литтермана с ML-калибровкой весов на российском фондовом рынке"
 
-Автор: Прокофьев
-Структура отчета следует методологии исследования и вдохновлена
-работой Абрамова А.Е. (НИУ ВШЭ, 2018).
-
 Отчет представляет собой единую длинную страницу с якорной навигацией
 в sidebar. Пользователь может переключаться между разделами через ссылки
 в боковой панели или листать страницу вниз.
@@ -58,7 +54,6 @@ st.markdown(
 
     h1, h2, h3, h4 {
         font-family: 'IBM Plex Serif', serif;
-        color: #1a1a2e;
     }
 
     .hero-report {
@@ -84,16 +79,16 @@ st.markdown(
     }
 
     .section-card {
-        background: #ffffff;
+        background: rgba(128, 128, 128, 0.08);
         border-radius: 12px;
         padding: 1.5rem;
         box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-        border: 1px solid #e8e8e8;
+        border: 1px solid rgba(128, 128, 128, 0.15);
         margin-bottom: 1.5rem;
     }
 
     .formula-box {
-        background: #f8f9fa;
+        background: rgba(128, 128, 128, 0.1);
         border-left: 4px solid #2c5364;
         padding: 1rem 1.25rem;
         border-radius: 0 8px 8px 0;
@@ -101,7 +96,7 @@ st.markdown(
     }
 
     .katex-display {
-        background: #f8f9fa;
+        background: rgba(128, 128, 128, 0.1);
         border-left: 4px solid #2c5364;
         padding: 1rem 1.25rem;
         border-radius: 0 8px 8px 0;
@@ -109,7 +104,7 @@ st.markdown(
     }
 
     .insight-box {
-        background: #e8f4f8;
+        background: rgba(23, 162, 184, 0.12);
         border-left: 4px solid #17a2b8;
         padding: 1rem 1.25rem;
         border-radius: 0 8px 8px 0;
@@ -117,7 +112,7 @@ st.markdown(
     }
 
     .warning-box {
-        background: #fff3cd;
+        background: rgba(255, 193, 7, 0.12);
         border-left: 4px solid #ffc107;
         padding: 1rem 1.25rem;
         border-radius: 0 8px 8px 0;
@@ -129,7 +124,7 @@ st.markdown(
         display: block;
         padding: 0.4rem 0.6rem;
         margin: 0.15rem 0;
-        color: #555;
+        color: inherit;
         text-decoration: none;
         border-radius: 6px;
         font-size: 0.9rem;
@@ -138,8 +133,8 @@ st.markdown(
     }
 
     .nav-link:hover {
-        background: #f0f0f0;
-        color: #000;
+        background: rgba(128, 128, 128, 0.15);
+        color: inherit;
         text-decoration: none;
     }
 
@@ -456,8 +451,8 @@ with col2:
             аналитик, тикер</li>
             <li>Модель штрафует агрессивные прогнозы и «плохих» аналитиков</li>
         </ul>
-        <hr style="margin: 1rem 0; border: none; border-top: 1px solid #e8e8e8;">
-        <p style="font-size: 0.9rem; color: #666;">
+        <hr style="margin: 1rem 0; border: none; border-top: 1px solid rgba(128,128,128,0.25);">
+        <p style="font-size: 0.9rem; opacity: 0.75;">
         <b>23 актива</b> портфеля MOEX · <b>65 прогнозов</b> аналитиков ·
         <b>Ridge (α=10)</b> с One-Hot Encoding
         </p>
@@ -470,12 +465,12 @@ with col2:
         f"""
         <div class="section-card" style="text-align:center;">
         <h4>Параметры модели</h4>
-        <div style="font-size: 2rem; font-weight: 600; color: #2c5364;">δ = {delta}</div>
-        <div style="font-size: 0.9rem; color: #666;">неприятие риска</div>
-        <div style="margin-top: 0.75rem; font-size: 2rem; font-weight: 600; color: #2c5364;">τ = {tau:.3f}</div>
-        <div style="font-size: 0.9rem; color: #666;">масштаб prior</div>
-        <div style="margin-top: 0.75rem; font-size: 2rem; font-weight: 600; color: #2c5364;">{median_y_pred*100:.2f}%</div>
-        <div style="font-size: 0.9rem; color: #666;">медианная ошибка ML</div>
+        <div style="font-size: 2rem; font-weight: 600;">δ = {delta}</div>
+        <div style="font-size: 0.9rem; opacity: 0.75;">неприятие риска</div>
+        <div style="margin-top: 0.75rem; font-size: 2rem; font-weight: 600;">τ = {tau:.3f}</div>
+        <div style="font-size: 0.9rem; opacity: 0.75;">масштаб prior</div>
+        <div style="margin-top: 0.75rem; font-size: 2rem; font-weight: 600;">{median_y_pred*100:.2f}%</div>
+        <div style="font-size: 0.9rem; opacity: 0.75;">медианная ошибка ML</div>
         </div>
         """,
         unsafe_allow_html=True,
