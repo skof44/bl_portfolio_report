@@ -21,10 +21,46 @@ import streamlit as st
 from black_litterman import (
     BLResult,
     build_ridge_views,
-    compute_bl_weights,
     reverse_optimize,
     run_black_litterman,
 )
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Соглашение о доходностях (см. black_litterman.py)
+# π, μ̂ и Q — избыточные (excess) доходности относительно Rf.
+# Total return = excess + Rf (единый Rf из sidebar для всего отчёта).
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def to_total(mu_excess: np.ndarray, rf: float) -> np.ndarray:
+    return mu_excess + rf
+
+
+def mean_q_excess_per_ticker(
+    P: np.ndarray,
+    Q: np.ndarray,
+    tickers: list[str],
+) -> dict[str, float]:
+    """Средний excess-Q по тикеру (если на актив несколько views)."""
+    n = len(tickers)
+    sums = np.zeros(n)
+    counts = np.zeros(n)
+    for i in range(P.shape[0]):
+        idxs = np.where(np.abs(P[i]) > 0.5)[0]
+        if len(idxs) == 1:
+            j = int(idxs[0])
+            sums[j] += Q[i]
+            counts[j] += 1
+    return {tickers[j]: float(sums[j] / counts[j]) for j in range(n) if counts[j] > 0}
+
+
+def return_convention_note(rf: float) -> str:
+    return (
+        f"<b>Соглашение:</b> π, μ̂ и Q — <b>избыточные</b> доходности (excess). "
+        f"Полная (total) доходность = excess + Rf, Rf = <b>{rf*100:.2f}%</b>. "
+        f"Разность μ̂ − π не зависит от Rf."
+    )
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Конфигурация страницы
@@ -276,7 +312,8 @@ with st.sidebar:
     st.caption(
         f"**Активов:** {n}  \n"
         f"**Прогнозов:** {len(pred_df)}  \n"
-        f"**Медианная ошибка ML:** {median_y_pred*100:.2f}%"
+        f"**Медианная ошибка ML:** {median_y_pred*100:.2f}%  \n"
+        f"**Rf (excess baseline):** {rf*100:.2f}%"
     )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -496,7 +533,7 @@ st.latex(
     \underbrace{\hat{\boldsymbol{\mu}} = \Big[ (\tau\boldsymbol{\Sigma})^{-1} + \mathbf{P}'\boldsymbol{\Omega}^{-1}\mathbf{P} \Big]^{-1}
     \Big[ (\tau\boldsymbol{\Sigma})^{-1}\boldsymbol{\pi} + \mathbf{P}'\boldsymbol{\Omega}^{-1}\mathbf{Q} \Big]}_{\text{Этап 4: Мастер-формула}}
     \quad \longrightarrow \quad
-    \underbrace{\mathbf{w}^* = (\delta\boldsymbol{\Sigma})^{-1}\hat{\boldsymbol{\mu}}}_{\text{Этап 5: Веса}}
+    \underbrace{\mathbf{w}^* = (\delta\hat{\boldsymbol{\Sigma}})^{-1}\hat{\boldsymbol{\mu}}}_{\text{Этап 5: Веса}}
     """
 )
 
@@ -606,7 +643,13 @@ st.markdown(
 
 st.latex(r"\boldsymbol{\pi} = \delta \boldsymbol{\Sigma} \mathbf{w}_{mkt}")
 
-pi = reverse_optimize(cov_np, w_mkt, delta)
+st.markdown(
+    f'<div class="insight-box">{return_convention_note(rf)}</div>',
+    unsafe_allow_html=True,
+)
+
+pi = bl_result.pi if bl_result is not None else reverse_optimize(cov_np, w_mkt, delta)
+pi_total = to_total(pi, rf)
 
 col1, col2 = st.columns([3, 2])
 with col1:
@@ -615,7 +658,7 @@ with col1:
         {
             "Тикер": tickers,
             "π (excess), %": (pi * 100).round(2),
-            "π + Rf (total), %": ((pi + rf) * 100).round(2),
+            "π total, %": (pi_total * 100).round(2),
             "Рыночный вес, %": (w_mkt * 100).round(2),
         }
     ).sort_values("π (excess), %", ascending=False)
@@ -671,13 +714,18 @@ st.markdown(
     В модели BL каждый прогноз аналитика — это строка линейной системы
     <b>P · μ = Q + ε</b>. В данном проекте используются <b>абсолютные views</b>:
     каждая строка P содержит единицу только для одного тикера.
+  Q — <b>избыточная</b> годовая доходность: potential_earn_rate_ann − risk_free_rate_ann.
     </p>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-st.latex(r"\mathbf{P}_{k \times n} \cdot \boldsymbol{\mu} = \mathbf{Q}_{k} + \boldsymbol{\varepsilon}, \qquad \boldsymbol{\varepsilon} \sim \mathcal{N}(0, \boldsymbol{\Omega})")
+st.latex(
+    r"\mathbf{P}_{k \times n} \cdot \boldsymbol{\mu} = \mathbf{Q}_{k} + \boldsymbol{\varepsilon}, "
+    r"\qquad \boldsymbol{\varepsilon} \sim \mathcal{N}(0, \boldsymbol{\Omega}), "
+    r"\quad Q_k = r^{\mathrm{total}}_k - R_f"
+)
 
 st.markdown("### Структура матриц")
 c1, c2, c3 = st.columns(3)
@@ -820,11 +868,14 @@ c4.metric("Test MedAE", f"{_test_medae:.2f}%")
 st.markdown("---")
 st.markdown("### Расчёт Ω в 5 шагов")
 
-# Покажем промежуточные вычисления
-views = build_ridge_views(tickers, cov_np, tau, pred_df, median_error=median_y_pred)
+# Промежуточные вычисления (те же views, что в BL-расчёте)
+if bl_result is not None and bl_result.views is not None:
+    views = bl_result.views
+else:
+    views = build_ridge_views(tickers, cov_np, tau, pred_df, median_error=median_y_pred)
 P, Q = views.P, views.Q
 baseline = tau * np.diag(P @ cov_np @ P.T)
-rel_err = pred_df["y_pred"].values / max(median_y_pred, 1e-8)
+rel_err = pred_df["y_pred"].values[: views.k] / max(median_y_pred, 1e-8)
 omega = np.diag(views.Omega)
 ratio = omega / np.maximum(baseline, 1e-12)
 
@@ -864,16 +915,24 @@ omega_df = pd.DataFrame(
         "baseline": baseline,
         "omega": omega,
         "ratio": ratio,
-        "Q (%)": (Q * 100).round(1),
+        "Q excess (%)": (Q * 100).round(1),
         "rel_err": rel_err.round(2),
     }
 )
 
 fig_omega = go.Figure()
-fig_omega.add_trace(go.Scatter(x=omega_df["Q (%)"], y=omega, mode="markers", marker=dict(size=8, color="#2c5364"), name="omega"))
+fig_omega.add_trace(
+    go.Scatter(
+        x=omega_df["Q excess (%)"],
+        y=omega,
+        mode="markers",
+        marker=dict(size=8, color="#2c5364"),
+        name="omega",
+    )
+)
 fig_omega.update_layout(
     height=400,
-    xaxis_title="Прогноз Q (%)",
+    xaxis_title="Q excess (%)",
     yaxis_title="Ω (неопределенность)",
     margin=dict(t=10, b=40),
 )
@@ -906,9 +965,16 @@ st.markdown(
     Мастер-формула объединяет <b>apriori</b> рыночное равновесие (π, τΣ) и
     <b>views</b> инвестора (P, Q, Ω) в байесовском смысле. Результат —
     posterior доходности μ̂ и posterior ковариация Σ̂.
+    π и μ̂ — <b>excess</b>-доходности; для сравнения с номинальными ставками
+    используйте столбец total = excess + Rf.
     </p>
     </div>
     """,
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    f'<div class="insight-box">{return_convention_note(rf)}</div>',
     unsafe_allow_html=True,
 )
 
@@ -942,6 +1008,8 @@ else:
     # Проверка эквивалентности
     pi = bl_result.pi
     mu_bl = bl_result.mu_bl
+    pi_total = to_total(pi, rf)
+    mu_total = to_total(mu_bl, rf)
     views = bl_result.views
     tau_cov = tau * cov_np
     A = tau_cov @ views.P.T @ np.linalg.inv(tau * views.P @ cov_np @ views.P.T + views.Omega)
@@ -950,39 +1018,72 @@ else:
 
     st.metric("Разница long-form vs short-form", f"{diff:.2e}", help="Должна быть << 1e-8")
 
-    st.subheader("Сравнение: равновесные vs апостериорные доходности")
-    fig = plot_bar_comparison(
-        tickers,
-        {
-            "π (excess), %": np.round(pi * 100, 2),
-            "π + Rf (total), %": np.round((pi + rf) * 100, 2),
-            "μ̂ (BL), %": np.round(mu_bl * 100, 2),
-        },
-        "Равновесные vs апостериорные доходности",
-        ytitle="% годовых",
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    tab_ex, tab_tot = st.tabs(["Excess (π, μ̂, Q)", "Total (excess + Rf)"])
 
-    st.subheader("Сдвиг доходностей: μ̂ − π")
-    shift = (mu_bl - pi) * 100
-    shift_df = pd.DataFrame({"Тикер": tickers, "Δ μ̂ − π, %": np.round(shift, 2)}).sort_values(
-        "Δ μ̂ − π, %", ascending=False
-    )
+    with tab_ex:
+        st.subheader("Сравнение excess-доходностей")
+        fig_ex = plot_bar_comparison(
+            tickers,
+            {
+                "π excess, %": np.round(pi * 100, 2),
+                "μ̂ excess, %": np.round(mu_bl * 100, 2),
+            },
+            "π vs μ̂ (excess)",
+            ytitle="Excess, % годовых",
+        )
+        st.plotly_chart(fig_ex, use_container_width=True)
+
+    with tab_tot:
+        st.subheader("Сравнение total-доходностей")
+        fig_tot = plot_bar_comparison(
+            tickers,
+            {
+                "π total, %": np.round(pi_total * 100, 2),
+                "μ̂ total, %": np.round(mu_total * 100, 2),
+            },
+            "π vs μ̂ (total)",
+            ytitle="Total, % годовых",
+        )
+        st.plotly_chart(fig_tot, use_container_width=True)
+
+    st.subheader("Сдвиг доходностей: μ̂ − π (excess)")
+    shift_excess = (mu_bl - pi) * 100
+    shift_total = (mu_total - pi_total) * 100
+    shift_df = pd.DataFrame(
+        {
+            "Тикер": tickers,
+            "π excess, %": np.round(pi * 100, 2),
+            "μ̂ excess, %": np.round(mu_bl * 100, 2),
+            "Δ excess (μ̂−π), %": np.round(shift_excess, 2),
+            "π total, %": np.round(pi_total * 100, 2),
+            "μ̂ total, %": np.round(mu_total * 100, 2),
+            "Δ total, %": np.round(shift_total, 2),
+        }
+    ).sort_values("Δ excess (μ̂−π), %", ascending=False)
     fig_shift = go.Figure(
         go.Bar(
             x=shift_df["Тикер"],
-            y=shift_df["Δ μ̂ − π, %"],
-            marker_color=["#2ca02c" if v >= 0 else "#d62728" for v in shift_df["Δ μ̂ − π, %"]],
+            y=shift_df["Δ excess (μ̂−π), %"],
+            marker_color=[
+                "#2ca02c" if v >= 0 else "#d62728"
+                for v in shift_df["Δ excess (μ̂−π), %"]
+            ],
         )
     )
-    fig_shift.update_layout(height=380, margin=dict(t=10, b=40), yaxis_title="Δ, %")
+    fig_shift.update_layout(
+        height=380,
+        margin=dict(t=10, b=40),
+        yaxis_title="Δ excess, п.п.",
+    )
     st.plotly_chart(fig_shift, use_container_width=True)
+    st.dataframe(shift_df, use_container_width=True, height=420, hide_index=True)
+    st.caption(
+        "Δ total совпадает с Δ excess: (μ̂+Rf)−(π+Rf) = μ̂−π. "
+        "Ранее на графиках смешивались π total и μ̂ excess — это давало ложный «сдвиг»."
+    )
 
-    # Проверка: posterior ближе к рынку?
-    Q_map = {}
-    for name, q in zip(views.names, views.Q):
-        t = name.split(" (")[0]
-        Q_map[t] = q
+    # Проверка: posterior ближе к равновесию, чем сырой Q?
+    Q_map = mean_q_excess_per_ticker(views.P, views.Q, tickers)
     abs_post = np.abs(mu_bl - pi)
     abs_Q = np.zeros(n)
     for i, t in enumerate(tickers):
@@ -1003,37 +1104,71 @@ else:
 
     st.subheader("Карта риск–доходность")
     vols = np.sqrt(np.diag(cov_np)) * 100
-    fig_rr = go.Figure()
-    fig_rr.add_trace(
-        go.Scatter(
-            x=vols,
-            y=np.round((pi + rf) * 100, 2),
-            mode="markers+text",
-            text=tickers,
-            textposition="top center",
-            marker=dict(size=10, color="#1f77b4"),
-            name="π + Rf (total)",
+    rr_tab_ex, rr_tab_tot = st.tabs(["Excess", "Total (+ Rf)"])
+    with rr_tab_ex:
+        fig_rr_ex = go.Figure()
+        fig_rr_ex.add_trace(
+            go.Scatter(
+                x=vols,
+                y=np.round(pi * 100, 2),
+                mode="markers+text",
+                text=tickers,
+                textposition="top center",
+                marker=dict(size=10, color="#1f77b4"),
+                name="π excess",
+            )
         )
-    )
-    fig_rr.add_trace(
-        go.Scatter(
-            x=vols,
-            y=np.round(mu_bl * 100, 2),
-            mode="markers+text",
-            text=tickers,
-            textposition="bottom center",
-            marker=dict(size=10, color="#2ca02c", symbol="diamond"),
-            name="μ̂ (BL)",
+        fig_rr_ex.add_trace(
+            go.Scatter(
+                x=vols,
+                y=np.round(mu_bl * 100, 2),
+                mode="markers+text",
+                text=tickers,
+                textposition="bottom center",
+                marker=dict(size=10, color="#2ca02c", symbol="diamond"),
+                name="μ̂ excess",
+            )
         )
-    )
-    fig_rr.update_layout(
-        height=500,
-        xaxis_title="Годовая волатильность, %",
-        yaxis_title="Ожидаемая доходность, %",
-        margin=dict(t=10, b=40),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-    )
-    st.plotly_chart(fig_rr, use_container_width=True)
+        fig_rr_ex.update_layout(
+            height=480,
+            xaxis_title="Годовая волатильность, %",
+            yaxis_title="Excess-доходность, %",
+            margin=dict(t=10, b=40),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        )
+        st.plotly_chart(fig_rr_ex, use_container_width=True)
+    with rr_tab_tot:
+        fig_rr = go.Figure()
+        fig_rr.add_trace(
+            go.Scatter(
+                x=vols,
+                y=np.round(pi_total * 100, 2),
+                mode="markers+text",
+                text=tickers,
+                textposition="top center",
+                marker=dict(size=10, color="#1f77b4"),
+                name="π total",
+            )
+        )
+        fig_rr.add_trace(
+            go.Scatter(
+                x=vols,
+                y=np.round(mu_total * 100, 2),
+                mode="markers+text",
+                text=tickers,
+                textposition="bottom center",
+                marker=dict(size=10, color="#2ca02c", symbol="diamond"),
+                name="μ̂ total",
+            )
+        )
+        fig_rr.update_layout(
+            height=480,
+            xaxis_title="Годовая волатильность, %",
+            yaxis_title="Total-доходность, %",
+            margin=dict(t=10, b=40),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        )
+        st.plotly_chart(fig_rr, use_container_width=True)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1055,18 +1190,24 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.latex(r"\mathbf{w}^* = (\delta\boldsymbol{\Sigma})^{-1} \hat{\boldsymbol{\mu}} \quad \longrightarrow \quad \text{long-only + normalize}")
+st.latex(
+    r"\mathbf{w}^* = (\delta\hat{\boldsymbol{\Sigma}})^{-1} \hat{\boldsymbol{\mu}} "
+    r"\quad \longrightarrow \quad \text{long-only + normalize}"
+)
 
 if bl_result is None:
     st.error("BL-результат недоступен.")
 else:
     pi = bl_result.pi
     mu_bl = bl_result.mu_bl
+    cov_bl = bl_result.cov_bl
     weights_mkt = bl_result.weights_mkt
     weights_bl = bl_result.weights_bl
+    pi_total = to_total(pi, rf)
+    mu_total = to_total(mu_bl, rf)
 
-    # Unconstrained для демонстрации
-    w_unconstrained = np.linalg.inv(delta * cov_np) @ mu_bl
+    # Unconstrained (posterior Σ̂) для демонстрации
+    w_unconstrained = np.linalg.inv(delta * cov_bl) @ mu_bl
 
     col1, col2 = st.columns(2)
     with col1:
@@ -1092,10 +1233,10 @@ else:
         {
             "Тикер": tickers,
             "π (excess), %": np.round(pi * 100, 2),
-            "π + Rf (total), %": np.round((pi + rf) * 100, 2),
-            "μ̂ (BL), %": np.round(mu_bl * 100, 2),
-            "μ̂ + Rf (total), %": np.round((mu_bl + rf) * 100, 2),
-            "Δ (μ̂−π), %": np.round((mu_bl - pi) * 100, 2),
+            "π total, %": np.round(pi_total * 100, 2),
+            "μ̂ excess, %": np.round(mu_bl * 100, 2),
+            "μ̂ total, %": np.round(mu_total * 100, 2),
+            "Δ excess (μ̂−π), %": np.round((mu_bl - pi) * 100, 2),
             "w_mkt, %": np.round(weights_mkt * 100, 2),
             "w_BL, %": np.round(weights_bl * 100, 2),
             "Δw (BL−mkt), %": np.round((weights_bl - weights_mkt) * 100, 2),
@@ -1133,10 +1274,12 @@ if bl_result is None:
     st.error("BL-результат недоступен.")
 else:
     mu_bl = bl_result.mu_bl
+    mu_total = to_total(mu_bl, rf)
     weights_bl = bl_result.weights_bl
     weights_mkt = bl_result.weights_mkt
 
     mu_p = weights_bl @ mu_bl
+    mu_p_total = mu_p + rf
     sigma_p = np.sqrt(weights_bl @ cov_np @ weights_bl)
     sharpe_bl = (mu_p - rf) / sigma_p
 
@@ -1148,11 +1291,20 @@ else:
 
     st.markdown("### Ключевые метрики портфеля")
     m1, m2, m3, m4, m5 = st.columns(5)
-    m1.metric("Доходность BL", f"{mu_p*100:.2f}%", delta=f"vs {mu_p_mkt*100:.2f}% рынок")
+    m1.metric(
+        "Изб. доходность BL",
+        f"{mu_p*100:.2f}%",
+        delta=f"vs {mu_p_mkt*100:.2f}% рынок",
+        help="Excess return портфеля (без Rf в числителе Sharpe)",
+    )
     m2.metric("Волатильность BL", f"{sigma_p*100:.2f}%", delta=f"vs {sigma_p_mkt*100:.2f}% рынок")
     m3.metric("Sharpe BL", f"{sharpe_bl:.3f}", delta=f"vs {sharpe_mkt:.3f} рынок")
     m4.metric("Tracking Error", f"{te*100:.2f}%")
     m5.metric("Активов в портфеле", f"{(weights_bl > 0.001).sum()}/{n}")
+    st.caption(
+        f"Total-доходность BL-портфеля ≈ {mu_p_total*100:.2f}% "
+        f"(изб. {mu_p*100:.2f}% + Rf {rf*100:.2f}%)."
+    )
 
     st.markdown("---")
     st.subheader("Структура итогового портфеля")
@@ -1163,7 +1315,8 @@ else:
             "Вес BL, %": np.round(weights_bl * 100, 2),
             "Вес рынок, %": np.round(weights_mkt * 100, 2),
             "Отклонение, п.п.": np.round((weights_bl - weights_mkt) * 100, 2),
-            "Вклад в доходность, п.п.": np.round(weights_bl * mu_bl * 100, 2),
+            "Вклад (excess), п.п.": np.round(weights_bl * mu_bl * 100, 2),
+            "Вклад (total), п.п.": np.round(weights_bl * mu_total * 100, 2),
         }
     ).sort_values("Вес BL, %", ascending=False)
 
@@ -1211,7 +1364,7 @@ else:
         comparison = pd.DataFrame(
             {
                 "Метрика": [
-                    "Ожидаемая доходность, %",
+                    "Избыточная доходность, %",
                     "Волатильность, %",
                     "Sharpe ratio",
                     "Max вес, %",
