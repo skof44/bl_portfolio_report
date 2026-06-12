@@ -87,6 +87,93 @@ def validate_return_scales(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Шрифты графиков (×2 для скриншотов / вставки в ВКР)
+# ─────────────────────────────────────────────────────────────────────────────
+CHART_FONT_SCALE = 2.0
+_CHART_FONT_FAMILY = "Inter, Arial, sans-serif"
+
+
+def _chart_fs(base: float) -> int:
+    return int(round(base * CHART_FONT_SCALE))
+
+
+def style_thesis_figure(fig: go.Figure, **layout) -> go.Figure:
+    """Крупные подписи осей, легенды и меток — удобно для Word/PDF."""
+    body = _chart_fs(12)
+    tick = _chart_fs(11)
+    title = _chart_fs(14)
+    legend = _chart_fs(11)
+    hover = _chart_fs(11)
+    heatmap_text = _chart_fs(10)
+
+    margin = layout.pop("margin", None) or {}
+    margin = {
+        "t": margin.get("t", _chart_fs(50)),
+        "b": margin.get("b", _chart_fs(55)),
+        "l": margin.get("l", _chart_fs(65)),
+        "r": margin.get("r", _chart_fs(25)),
+    }
+
+    legend_kw = layout.pop("legend", {}) or {}
+    legend_kw = {
+        **legend_kw,
+        "font": {
+            **(legend_kw.get("font") or {}),
+            "size": legend,
+            "family": _CHART_FONT_FAMILY,
+        },
+    }
+
+    fig.update_layout(
+        font=dict(family=_CHART_FONT_FAMILY, size=body, color="#1a1a1a"),
+        title_font=dict(size=title, family=_CHART_FONT_FAMILY),
+        legend=legend_kw,
+        hoverlabel=dict(font_size=hover, font_family=_CHART_FONT_FAMILY),
+        margin=margin,
+        **layout,
+    )
+    fig.update_xaxes(
+        tickfont=dict(size=tick, family=_CHART_FONT_FAMILY),
+        title_font=dict(size=tick, family=_CHART_FONT_FAMILY),
+    )
+    fig.update_yaxes(
+        tickfont=dict(size=tick, family=_CHART_FONT_FAMILY),
+        title_font=dict(size=tick, family=_CHART_FONT_FAMILY),
+    )
+    try:
+        fig.update_coloraxes(
+            colorbar=dict(
+                tickfont=dict(size=tick, family=_CHART_FONT_FAMILY),
+                title_font=dict(size=tick, family=_CHART_FONT_FAMILY),
+            ),
+        )
+    except (ValueError, TypeError):
+        pass
+
+    fig.update_traces(
+        textfont=dict(size=tick, family=_CHART_FONT_FAMILY),
+        textfont_size=tick,
+    )
+
+    for trace in fig.data:
+        marker = getattr(trace, "marker", None)
+        if marker is None:
+            continue
+        size = getattr(marker, "size", None)
+        if isinstance(size, (int, float)) and size > 0:
+            marker.size = max(int(size * CHART_FONT_SCALE), 14)
+        if getattr(trace, "type", None) == "heatmap" and hasattr(trace, "textfont"):
+            trace.textfont = dict(size=heatmap_text, family=_CHART_FONT_FAMILY)
+
+    return fig
+
+
+def show_thesis_chart(fig: go.Figure, **layout) -> None:
+    style_thesis_figure(fig, **layout)
+    st.plotly_chart(fig, use_container_width=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Конфигурация страницы
 # ─────────────────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -414,7 +501,6 @@ def plot_bar_comparison(
         xaxis_title="",
         yaxis_title=ytitle,
         height=height,
-        margin=dict(t=10, b=40),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
         hovermode="x unified",
     )
@@ -444,7 +530,6 @@ def plot_waterfall_weights(
         xaxis_title="",
         yaxis_title="Δ веса, %",
         height=420,
-        margin=dict(t=50, b=40),
     )
     return fig
 
@@ -622,8 +707,7 @@ with col_right:
         color_discrete_sequence=px.colors.sequential.Teal,
     )
     fig_pie.update_traces(textposition="inside", textinfo="percent+label")
-    fig_pie.update_layout(height=480, showlegend=False, margin=dict(t=10, b=10))
-    st.plotly_chart(fig_pie, use_container_width=True)
+    show_thesis_chart(fig_pie, height=480, showlegend=False, margin=dict(t=15, b=15))
 
 st.subheader("Корреляционная матрица активов")
 fig_cov = px.imshow(
@@ -636,8 +720,7 @@ fig_cov = px.imshow(
     aspect="auto",
     text_auto=".2f",
 )
-fig_cov.update_layout(height=620, margin=dict(t=10, b=10))
-st.plotly_chart(fig_cov, use_container_width=True)
+show_thesis_chart(fig_cov, height=620, margin=dict(t=20, b=20))
 
 st.caption(
     "На диагонали корреляционной матрицы стоят 1 (совершенная положительная корреляция актива с самим собой). "
@@ -730,9 +813,13 @@ with col2:
         color_discrete_sequence=["#2c5364"],
         opacity=0.85,
     )
-    fig.add_vline(x=float(pi_df["π (excess), %"].mean()), line_dash="dash", line_color="red")
-    fig.update_layout(height=400, margin=dict(t=10, b=40), showlegend=False)
-    st.plotly_chart(fig, use_container_width=True)
+    fig.add_vline(
+        x=float(pi_df["π (excess), %"].mean()),
+        line_dash="dash",
+        line_color="red",
+        annotation_font_size=_chart_fs(11),
+    )
+    show_thesis_chart(fig, height=400, showlegend=False)
 
     st.markdown(
         f"""
@@ -801,8 +888,7 @@ fig = px.bar(
     color_continuous_scale="Teal",
     text="Число прогнозов",
 )
-fig.update_layout(height=380, margin=dict(t=10, b=40), showlegend=False)
-st.plotly_chart(fig, use_container_width=True)
+show_thesis_chart(fig, height=380, showlegend=False)
 
 st.subheader("Распределение прогнозов Q (excess)")
 fig2 = go.Figure()
@@ -819,9 +905,9 @@ fig2.add_vline(
     line_dash="dash",
     line_color="red",
     annotation_text=f"μ = {pred_df['q_excess'].mean()*100:.1f}%",
+    annotation_font_size=_chart_fs(11),
 )
-fig2.update_layout(height=320, margin=dict(t=10, b=40), xaxis_title="Q excess, % годовых")
-st.plotly_chart(fig2, use_container_width=True)
+show_thesis_chart(fig2, height=320, xaxis_title="Q excess, % годовых")
 
 st.markdown(
     f"""
@@ -990,13 +1076,12 @@ fig_omega.add_trace(
         name="omega",
     )
 )
-fig_omega.update_layout(
+show_thesis_chart(
+    fig_omega,
     height=400,
     xaxis_title="Q excess (%)",
     yaxis_title="Ω (неопределенность)",
-    margin=dict(t=10, b=40),
 )
-st.plotly_chart(fig_omega, use_container_width=True)
 
 st.dataframe(omega_df.sort_values("omega", ascending=False), use_container_width=True, height=320, hide_index=True)
 
@@ -1115,7 +1200,7 @@ else:
             "π vs μ̂ (total)",
             ytitle="Total, % годовых",
         )
-        st.plotly_chart(fig_tot, use_container_width=True)
+        show_thesis_chart(fig_tot)
 
     with tab_ex:
         st.subheader("Сравнение excess-доходностей")
@@ -1128,7 +1213,7 @@ else:
             "π vs μ̂ (excess)",
             ytitle="Excess, % годовых",
         )
-        st.plotly_chart(fig_ex, use_container_width=True)
+        show_thesis_chart(fig_ex)
 
     st.subheader("Сдвиг доходностей: μ̂ − π")
     shift_excess = (mu_bl - pi) * 100
@@ -1154,12 +1239,7 @@ else:
             ],
         )
     )
-    fig_shift.update_layout(
-        height=380,
-        margin=dict(t=10, b=40),
-        yaxis_title="Δ excess, п.п.",
-    )
-    st.plotly_chart(fig_shift, use_container_width=True)
+    show_thesis_chart(fig_shift, height=380, yaxis_title="Δ excess, п.п.")
     st.dataframe(shift_df, use_container_width=True, height=420, hide_index=True)
     st.caption(
         "Столбцы Δ excess и Δ total совпадают: (μ̂+Rf)−(π+Rf) = μ̂−π. "
@@ -1215,14 +1295,13 @@ else:
                 name="μ̂ excess",
             )
         )
-        fig_rr_ex.update_layout(
+        show_thesis_chart(
+            fig_rr_ex,
             height=480,
             xaxis_title="Годовая волатильность, %",
             yaxis_title="Excess-доходность, %",
-            margin=dict(t=10, b=40),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
         )
-        st.plotly_chart(fig_rr_ex, use_container_width=True)
     with rr_tab_tot:
         fig_rr = go.Figure()
         fig_rr.add_trace(
@@ -1247,14 +1326,13 @@ else:
                 name="μ̂ total",
             )
         )
-        fig_rr.update_layout(
+        show_thesis_chart(
+            fig_rr,
             height=480,
             xaxis_title="Годовая волатильность, %",
             yaxis_title="Total-доходность, %",
-            margin=dict(t=10, b=40),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
         )
-        st.plotly_chart(fig_rr, use_container_width=True)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1307,12 +1385,12 @@ else:
             "Сравнение весов портфелей",
             ytitle="Вес, %",
         )
-        st.plotly_chart(fig, use_container_width=True)
+        show_thesis_chart(fig)
 
     with col2:
         st.subheader("Изменение весов (waterfall)")
         fig_wf = plot_waterfall_weights(tickers, weights_mkt, weights_bl)
-        st.plotly_chart(fig_wf, use_container_width=True)
+        show_thesis_chart(fig_wf)
 
     st.subheader("Сводная таблица")
     res_df = pd.DataFrame(
@@ -1417,13 +1495,12 @@ else:
         color_discrete_sequence=px.colors.sequential.Teal,
     )
     fig_pie_bl.update_traces(textposition="inside", textinfo="percent+label")
-    fig_pie_bl.update_layout(height=500, showlegend=False, margin=dict(t=10, b=10))
 
     col_left, col_right = st.columns([3, 2])
     with col_left:
         st.dataframe(final_df, use_container_width=True, height=520)
     with col_right:
-        st.plotly_chart(fig_pie_bl, use_container_width=True)
+        show_thesis_chart(fig_pie_bl, height=500, showlegend=False, margin=dict(t=15, b=15))
 
     st.markdown("---")
     st.subheader("Сравнение портфелей (ex-ante)")
