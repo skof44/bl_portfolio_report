@@ -28,6 +28,10 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# Фиксированный τ для калибровки Ω (baseline). Отделён от τ в мастер-формуле:
+# если Ω ∝ τ_sidebar, параметр в UI «не работает» — τ сокращается в μ̂.
+DEFAULT_TAU_OMEGA = 0.025
+
 
 # ─── Dataclasses ──────────────────────────────────────────────────────────────
 
@@ -438,10 +442,10 @@ def build_ml_views(
 def build_ridge_views(
     tickers: list[str],
     cov: np.ndarray,
-    tau: float,
     df_signals: "pd.DataFrame",
     median_error: float | None = None,
     *,
+    tau_omega: float = DEFAULT_TAU_OMEGA,
     rf: float | None = None,
 ) -> BLViews:
     """
@@ -451,7 +455,7 @@ def build_ridge_views(
     дифференцировать omega для разных аналитиков по одному тикеру.
 
     Логика Omega (5 шагов):
-        1. baseline = tau * diag(P @ Sigma @ P.T)        # K × 1
+        1. baseline = tau_omega * diag(P @ Sigma @ P.T)  # K × 1 (фикс. τ, не из sidebar)
         2. median_error — медианная ошибка по истории    # скаляр
         3. rel_err = predicted_errors / median_error     # K × 1
         4. alpha = 1.0, beta = 1.0
@@ -461,7 +465,7 @@ def build_ridge_views(
     ----------
     tickers      : имена активов в портфеле (n штук)
     cov          : годовая ковариационная матрица (n × n)
-    tau          : масштаб неопределённости prior
+    tau_omega    : τ для baseline Ω (по умолчанию 0.025); не смешивать с τ мастер-формулы
     df_signals   : DataFrame с колонками ['ticker', 'potential_earn_rate_ann',
                    'risk_free_rate_ann', 'y_pred', 'analyst_name']
     median_error : медианная предсказанная ошибка по истории (если None — загрузит из артефактов)
@@ -519,7 +523,7 @@ def build_ridge_views(
 
     # --- Расчёт Omega по инструкции ---
     # Шаг 1: Baseline
-    baseline = tau * np.diag(P @ cov @ P.T)  # K × 1
+    baseline = tau_omega * np.diag(P @ cov @ P.T)  # K × 1
 
     # Шаг 2: Медианная ошибка (загружаем из артефактов, если не передана)
     if median_error is None:

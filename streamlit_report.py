@@ -20,6 +20,7 @@ import streamlit as st
 
 from black_litterman import (
     BLResult,
+    DEFAULT_TAU_OMEGA,
     build_ridge_views,
     reverse_optimize,
     run_black_litterman,
@@ -315,7 +316,10 @@ with st.sidebar:
         value=0.025,
         step=0.005,
         format="%.3f",
-        help="Масштаб неопределенности априорного распределения. Рекомендуется 0.025 (1/40)",
+        help=(
+            "Влияет на мастер-формулу (вес prior vs views). "
+            f"Ω калибруется отдельно при фикс. τ_Ω={DEFAULT_TAU_OMEGA}."
+        ),
     )
     rf = st.number_input(
         "Rf — безрисковая ставка",
@@ -361,7 +365,6 @@ def compute_bl(
     views = build_ridge_views(
         list(tickers_key),
         cov,
-        tau_f,
         pred_local,
         median_error=median_y_pred,
         rf=rf_f,
@@ -464,7 +467,7 @@ def sweep_delta_metrics(
     pred_local = pickle.loads(pred_bytes)
     tickers = list(tickers_key)
     views = build_ridge_views(
-        tickers, cov, tau_f, pred_local, median_error=median_y_pred, rf=rf_f
+        tickers, cov, pred_local, median_error=median_y_pred, rf=rf_f
     )
 
     deltas = np.linspace(delta_min, delta_max, n_points)
@@ -1080,10 +1083,10 @@ if bl_result is not None and bl_result.views is not None:
     views = bl_result.views
 else:
     views = build_ridge_views(
-        tickers, cov_np, tau, pred_df, median_error=median_y_pred, rf=rf
+        tickers, cov_np, pred_df, median_error=median_y_pred, rf=rf
     )
 P, Q = views.P, views.Q
-baseline = tau * np.diag(P @ cov_np @ P.T)
+baseline = DEFAULT_TAU_OMEGA * np.diag(P @ cov_np @ P.T)
 rel_err = pred_df["y_pred"].values[: views.k] / max(median_y_pred, 1e-8)
 omega = np.diag(views.Omega)
 ratio = omega / np.maximum(baseline, 1e-12)
@@ -1092,14 +1095,15 @@ step_col1, step_col2 = st.columns(2)
 
 with step_col1:
     st.markdown(
-        """
+        f"""
         <div class="insight-box">
-        <b>Шаг 1:</b> baseline = τ · diag(PΣP')<br>
-        <b>Шаг 2:</b> median_error = {:.2f}%<br>
+        <b>Шаг 1:</b> baseline = τ_Ω · diag(PΣP') (τ_Ω = {DEFAULT_TAU_OMEGA:.3f}, фикс.)<br>
+        <b>Шаг 2:</b> median_error = {median_y_pred * 100:.2f}%<br>
         <b>Шаг 3:</b> rel_err = predicted_error / median_error<br>
-        <b>Шаг 4-5:</b> ω = baseline · (1 + rel_err²) · (1 + 10·Q²)
+        <b>Шаг 4-5:</b> ω = baseline · (1 + rel_err²) · (1 + 10·Q²)<br>
+        <b>τ из sidebar</b> влияет только на этап 4 (мастер-формула), не на Ω.
         </div>
-        """.format(median_y_pred * 100),
+        """,
         unsafe_allow_html=True,
     )
 

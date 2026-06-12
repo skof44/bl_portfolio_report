@@ -101,7 +101,7 @@ def main() -> dict:
         ml_metrics = json.load(f)
 
     views_ml = build_ridge_views(
-        tickers, cov, TAU, pred, ml_metrics["median_y_pred"], rf=RF
+        tickers, cov, pred, ml_metrics["median_y_pred"], rf=RF
     )
     res_ml = run_black_litterman(tickers, cov, w_mkt, views_ml, delta=DELTA, tau=TAU)
 
