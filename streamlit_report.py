@@ -99,12 +99,16 @@ def _chart_fs(base: float) -> int:
 
 def style_thesis_figure(fig: go.Figure, **layout) -> go.Figure:
     """Крупные подписи осей, легенды и меток — удобно для Word/PDF."""
+    trace_text_scale = float(layout.pop("trace_text_scale", 1.0))
+    heatmap_text_scale = float(layout.pop("heatmap_text_scale", 1.0))
+
     body = _chart_fs(12)
     tick = _chart_fs(11)
     title_fs = _chart_fs(14)
     legend_fs = _chart_fs(11)
     hover = _chart_fs(11)
-    heatmap_text = _chart_fs(10)
+    trace_text = int(round(tick * trace_text_scale))
+    heatmap_text = int(round(_chart_fs(10) * heatmap_text_scale))
     axis_title_font = dict(size=tick, family=_CHART_FONT_FAMILY)
 
     margin = layout.pop("margin", None) or {}
@@ -121,8 +125,8 @@ def style_thesis_figure(fig: go.Figure, **layout) -> go.Figure:
         legend_font = dict(legend_kw.pop("font", None) or {})
         legend_font.update(size=legend_fs, family=_CHART_FONT_FAMILY)
         legend_kw["font"] = legend_font
-        # title_font / пустой title без text → «undefined» над легендой в Plotly.js
-        legend_kw["title"] = None
+        # Не задавать legend.title=None — в JSON это {}, Plotly.js рисует «undefined»
+        legend_kw.pop("title", None)
 
     layout.pop("title_font", None)
 
@@ -151,7 +155,7 @@ def style_thesis_figure(fig: go.Figure, **layout) -> go.Figure:
         merged_title["font"] = title_font
         layout_patch["title"] = merged_title
     else:
-        layout_patch["title"] = None
+        layout_patch.pop("title", None)
 
     fig.update_layout(**layout_patch)
 
@@ -167,25 +171,23 @@ def style_thesis_figure(fig: go.Figure, **layout) -> go.Figure:
 
     try:
         fig.update_coloraxes(
-            colorbar=dict(
-                tickfont=dict(size=tick, family=_CHART_FONT_FAMILY),
-                title=None,
-            ),
+            colorbar=dict(tickfont=dict(size=tick, family=_CHART_FONT_FAMILY)),
         )
     except (ValueError, TypeError):
         pass
 
-    fig.update_traces(textfont=dict(size=tick, family=_CHART_FONT_FAMILY))
+    fig.update_traces(textfont=dict(size=trace_text, family=_CHART_FONT_FAMILY))
 
     for trace in fig.data:
+        if getattr(trace, "type", None) == "heatmap" and hasattr(trace, "textfont"):
+            trace.textfont = dict(size=heatmap_text, family=_CHART_FONT_FAMILY)
+            continue
         marker = getattr(trace, "marker", None)
         if marker is None:
             continue
         size = getattr(marker, "size", None)
         if isinstance(size, (int, float)) and size > 0:
             marker.size = max(int(size * CHART_FONT_SCALE), 14)
-        if getattr(trace, "type", None) == "heatmap" and hasattr(trace, "textfont"):
-            trace.textfont = dict(size=heatmap_text, family=_CHART_FONT_FAMILY)
 
     return fig
 
@@ -742,7 +744,7 @@ fig_cov = px.imshow(
     aspect="auto",
     text_auto=".2f",
 )
-show_thesis_chart(fig_cov, height=620, margin=dict(t=20, b=20))
+show_thesis_chart(fig_cov, height=620, margin=dict(t=20, b=20), heatmap_text_scale=0.75)
 
 st.caption(
     "На диагонали корреляционной матрицы стоят 1 (совершенная положительная корреляция актива с самим собой). "
@@ -1323,6 +1325,7 @@ else:
             xaxis_title="Годовая волатильность, %",
             yaxis_title="Excess-доходность, %",
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+            trace_text_scale=0.75,
         )
     with rr_tab_tot:
         fig_rr = go.Figure()
@@ -1354,6 +1357,7 @@ else:
             xaxis_title="Годовая волатильность, %",
             yaxis_title="Total-доходность, %",
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+            trace_text_scale=0.75,
         )
 
 
