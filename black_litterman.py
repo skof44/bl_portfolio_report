@@ -207,8 +207,9 @@ def compute_bl_weights(
     """
     Оптимальные веса BL-портфеля.
 
-        w* = (δΣ)⁻¹ · μ̂
+        w* = (δΣ̂)⁻¹ · μ̂
 
+    Параметр cov — апостериорная ковариация Σ̂ из мастер-формулы.
     Аналитическое решение задачи Марковица без ограничений.
     При long_only=True отрицательные веса обнуляются (long-only портфель).
     При normalize=True нормировка к sum(w*) = 1.
@@ -370,75 +371,6 @@ def build_moex_views(
     return BLViews(P=P, Q=Q, Omega=Omega, names=tuple(names))
 
 
-def build_ml_views(
-    tickers: list[str],
-    cov: np.ndarray,
-    tau: float,
-    df_signals: "pd.DataFrame",
-    model_mse: float,
-) -> BLViews:
-    """
-    Строит BLViews из предсказаний ML-модели.
-
-    Для каждого тикера, присутствующего и в портфеле, и в df_signals,
-    создаётся абсолютный view:
-        P_i = [0, ..., 1, ..., 0]  (1 на позиции тикера)
-        Q_i = среднее predicted_return по сигналам этого тикера
-        Ω_ii = max(model_mse, 1e-8)  (дисперсия ошибки модели)
-
-    Parameters
-    ----------
-    tickers      : имена активов в портфеле (n штук)
-    cov          : годовая ковариационная матрица (n × n)
-    tau          : масштаб неопределённости prior
-    df_signals   : DataFrame с колонками ['ticker', 'predicted_return']
-                   (результат predict_annual_returns из ml_model.py)
-    model_mse    : MSE модели на валидации/тесте — дисперсия ошибки предсказания
-
-    Returns
-    -------
-    BLViews с views для всех тикеров, по которым есть предсказания.
-    """
-    import pandas as pd
-
-    n = len(tickers)
-    idx = {t: i for i, t in enumerate(tickers)}
-
-    rows_P: list[np.ndarray] = []
-    rows_Q: list[float] = []
-    names: list[str] = []
-
-    # Усредняем предсказания по тикеру (если сигналов несколько)
-    grouped = df_signals.groupby("ticker")["predicted_return"].mean()
-
-    for ticker, pred_return in grouped.items():
-        if ticker not in idx:
-            logger.warning("Тикер %s из сигналов отсутствует в портфеле — пропускаю.", ticker)
-            continue
-
-        p = np.zeros(n)
-        p[idx[ticker]] = 1.0
-
-        rows_P.append(p)
-        rows_Q.append(float(pred_return))
-        names.append(f"{ticker}: ML-прогноз {pred_return:.1%} годовых")
-
-    if not rows_P:
-        raise RuntimeError(
-            "Ни один тикер из сигналов не найден в портфеле. "
-            "Проверьте соответствие тикеров в prices/signals."
-        )
-
-    P = np.vstack(rows_P)
-    Q = np.array(rows_Q)
-    # Ω_ii = дисперсия ошибки модели (MSE).
-    # Добавляем epsilon чтобы избежать вырождения при идеальных предсказаниях.
-    omega_diag = np.full(P.shape[0], max(float(model_mse), 1e-8))
-    Omega = np.diag(omega_diag)
-
-    return BLViews(P=P, Q=Q, Omega=Omega, names=tuple(names))
-
-
 def build_ridge_views(
     tickers: list[str],
     cov: np.ndarray,
@@ -455,11 +387,11 @@ def build_ridge_views(
     дифференцировать omega для разных аналитиков по одному тикеру.
 
     Логика Omega (5 шагов):
-        1. baseline = tau_omega * diag(P @ Sigma @ P.T)  # K × 1 (фикс. τ, не из sidebar)
+        1. baseline = tau_omega * diag(P @ Sigma @ P.T)  # K × 1 (фикс. τ_Ω, не τ sidebar)
         2. median_error — медианная ошибка по истории    # скаляр
         3. rel_err = predicted_errors / median_error     # K × 1
         4. alpha = 1.0, beta = 1.0
-        5. omega = baseline * (alpha + beta * rel_err^2) # K × 1
+        5. omega = baseline * (alpha + beta * rel_err²) * (1 + alpha_q * Q²)
 
     Parameters
     ----------

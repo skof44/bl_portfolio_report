@@ -4,7 +4,7 @@
     "tau": 0.025,
     "rf": 0.1281
   },
-  "note": "Ex-ante метрики на основе μ̂, π и Σ (EWMA). Max Drawdown требует backtest на реализованных доходностях.",
+  "note": "Ex-ante метрики. BL-портфели: vol/Sharpe/Sortino на апостериорной Σ̂; tracking error — на prior Σ (EWMA). Остальные портфели — на Σ. Max Drawdown требует backtest на реализованных доходностях.",
   "ml_metrics": {
     "model_type": "Ridge_OHE",
     "split": "chronological_80_20",
@@ -75,51 +75,51 @@
     "n_forecasts": 65,
     "q_total_mean_pct": 37.2,
     "q_total_median_pct": 37.3,
-    "q_excess_mean_pct": 23.8,
-    "q_excess_median_pct": 24.2,
-    "q_excess_min_pct": -5.6,
-    "q_excess_max_pct": 36.4
+    "q_excess_mean_pct": 24.4,
+    "q_excess_median_pct": 24.5,
+    "q_excess_min_pct": -5.4,
+    "q_excess_max_pct": 36.6
   },
   "median_error_pct": 24.32,
   "unconstrained_weights_pct": {
-    "max": 127.0,
-    "min": -70.8
+    "max": 126.2,
+    "min": -69.8
   },
   "bl_portfolio_summary": {
-    "sharpe_bl": 0.33,
+    "sharpe_bl": 0.365,
     "sharpe_market": -0.762,
-    "max_weight_pct": 15.1,
+    "max_weight_pct": 14.8,
     "max_weight_ticker": "SBER",
     "active_assets": 17,
     "total_assets": 23,
-    "hhi": 0.086,
+    "hhi": 0.087,
     "hhi_market": 0.1,
     "avg_weight_pct": 5.88
   },
   "benchmarks": [
     {
       "portfolio": "BL+ML",
-      "mu_excess_pct": 16.05,
-      "volatility_pct": 9.83,
-      "sharpe": 0.33,
-      "sortino": 1.362,
-      "hhi": 0.086,
+      "mu_excess_pct": 16.4,
+      "volatility_pct": 9.85,
+      "sharpe": 0.365,
+      "sortino": 1.479,
+      "hhi": 0.087,
       "tracking_error_pct": 4.8,
-      "turnover_vs_market": 0.458,
-      "max_weight_pct": 15.1,
+      "turnover_vs_market": 0.459,
+      "max_weight_pct": 14.8,
       "active_assets": 17
     },
     {
       "portfolio": "BL base",
-      "mu_excess_pct": 19.79,
-      "volatility_pct": 10.04,
-      "sharpe": 0.695,
-      "sortino": 3.338,
-      "hhi": 0.099,
-      "tracking_error_pct": 5.27,
-      "turnover_vs_market": 0.563,
-      "max_weight_pct": 15.7,
-      "active_assets": 16
+      "mu_excess_pct": 20.3,
+      "volatility_pct": 10.03,
+      "sharpe": 0.746,
+      "sortino": 9.48,
+      "hhi": 0.101,
+      "tracking_error_pct": 5.33,
+      "turnover_vs_market": 0.569,
+      "max_weight_pct": 15.8,
+      "active_assets": 14
     },
     {
       "portfolio": "Market",

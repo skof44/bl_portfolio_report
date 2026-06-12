@@ -1038,6 +1038,18 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+st.markdown(
+    f"""
+    <div class="warning-box">
+    <b>Два параметра τ:</b> слайдер <b>τ = {tau:.3f}</b> в sidebar управляет только
+    мастер-формулой (компромисс prior π vs views). Калибровка Ω на этапе 3 использует
+    фиксированный <b>τ_Ω = {DEFAULT_TAU_OMEGA:.3f}</b> — при изменении τ в UI матрица Ω
+    не пересчитывается, меняются только μ̂ и Σ̂.
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.markdown("### Long-form формула")
 st.latex(
     r"""
@@ -1348,13 +1360,14 @@ if bl_result is None:
     st.error("BL-результат недоступен.")
 else:
     mu_bl = bl_result.mu_bl
+    cov_bl = bl_result.cov_bl
     mu_total = to_total(mu_bl, rf)
     weights_bl = bl_result.weights_bl
     weights_mkt = bl_result.weights_mkt
 
     mu_p = weights_bl @ mu_bl
     mu_p_total = mu_p + rf
-    sigma_p = np.sqrt(weights_bl @ cov_np @ weights_bl)
+    sigma_p = np.sqrt(weights_bl @ cov_bl @ weights_bl)
     sharpe_bl = (mu_p - rf) / sigma_p
 
     mu_p_mkt = weights_mkt @ bl_result.pi
@@ -1377,7 +1390,9 @@ else:
     m5.metric("Активов в портфеле", f"{(weights_bl > 0.001).sum()}/{n}")
     st.caption(
         f"Total-доходность BL-портфеля ≈ {mu_p_total*100:.2f}% "
-        f"(изб. {mu_p*100:.2f}% + Rf {rf*100:.2f}%)."
+        f"(изб. {mu_p*100:.2f}% + Rf {rf*100:.2f}%). "
+        f"Волатильность и Sharpe BL — на апостериорной Σ̂; рынок — на prior Σ; "
+        f"tracking error — на prior Σ (EWMA)."
     )
 
     st.markdown("---")

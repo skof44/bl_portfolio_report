@@ -63,21 +63,26 @@ def portfolio_metrics(
     name: str,
     w: np.ndarray,
     mu: np.ndarray,
-    cov: np.ndarray,
+    risk_cov: np.ndarray,
     w_mkt: np.ndarray,
     rf: float,
+    *,
+    te_cov: np.ndarray,
 ) -> dict:
+    """risk_cov: Σ или Σ̂ для vol/Sharpe/Sortino; te_cov: prior Σ для tracking error."""
     mu_p = float(w @ mu)
-    sigma = float(np.sqrt(w @ cov @ w))
+    sigma = float(np.sqrt(w @ risk_cov @ w))
     sharpe = (mu_p - rf) / sigma if sigma > 0 else float("nan")
     return {
         "portfolio": name,
         "mu_excess_pct": round(mu_p * 100, 2),
         "volatility_pct": round(sigma * 100, 2),
         "sharpe": round(sharpe, 3),
-        "sortino": round(sortino_ex_ante(w, mu, cov, rf), 3),
+        "sortino": round(sortino_ex_ante(w, mu, risk_cov, rf), 3),
         "hhi": round(float(np.sum(w**2)), 3),
-        "tracking_error_pct": round(float(np.sqrt((w - w_mkt) @ cov @ (w - w_mkt))) * 100, 2),
+        "tracking_error_pct": round(
+            float(np.sqrt((w - w_mkt) @ te_cov @ (w - w_mkt))) * 100, 2
+        ),
         "turnover_vs_market": round(float(np.abs(w - w_mkt).sum() / 2), 3),
         "max_weight_pct": round(float(w.max() * 100), 1),
         "active_assets": int((w > 0.001).sum()),
@@ -115,15 +120,16 @@ def main() -> dict:
     w_unconstrained = np.linalg.inv(DELTA * res_ml.cov_bl) @ res_ml.mu_bl
 
     portfolios = [
-        ("BL+ML", res_ml.weights_bl, res_ml.mu_bl),
-        ("BL base", res_hl.weights_bl, res_hl.mu_bl),
-        ("Market", w_mkt, pi),
-        ("1/N", w_1n, pi),
-        ("Markowitz", w_mz, pi),
+        ("BL+ML", res_ml.weights_bl, res_ml.mu_bl, res_ml.cov_bl),
+        ("BL base", res_hl.weights_bl, res_hl.mu_bl, res_hl.cov_bl),
+        ("Market", w_mkt, pi, cov),
+        ("1/N", w_1n, pi, cov),
+        ("Markowitz", w_mz, pi, cov),
     ]
 
     benchmark_rows = [
-        portfolio_metrics(name, w, mu, cov, w_mkt, RF) for name, w, mu in portfolios
+        portfolio_metrics(name, w, mu, risk_cov, w_mkt, RF, te_cov=cov)
+        for name, w, mu, risk_cov in portfolios
     ]
 
     forecast_stats = {
@@ -142,7 +148,8 @@ def main() -> dict:
     summary = {
         "parameters": {"delta": DELTA, "tau": TAU, "rf": RF},
         "note": (
-            "Ex-ante метрики на основе μ̂, π и Σ (EWMA). "
+            "Ex-ante метрики. BL-портфели: vol/Sharpe/Sortino на апостериорной Σ̂; "
+            "tracking error — на prior Σ (EWMA). Остальные портфели — на Σ. "
             "Max Drawdown требует backtest на реализованных доходностях."
         ),
         "ml_metrics": ml_metrics,
