@@ -56,10 +56,33 @@ def mean_q_excess_per_ticker(
 
 def return_convention_note(rf: float) -> str:
     return (
-        f"<b>Соглашение:</b> π, μ̂ и Q — <b>избыточные</b> доходности (excess). "
-        f"Полная (total) доходность = excess + Rf, Rf = <b>{rf*100:.2f}%</b>. "
-        f"Разность μ̂ − π не зависит от Rf."
+        f"<b>Соглашение:</b> π, μ̂ и Q в формулах BL — <b>избыточные</b> доходности (excess) "
+        f"относительно единого Rf = <b>{rf*100:.2f}%</b>. "
+        f"Total = excess + Rf. μ̂ <b>не</b> содержит Rf внутри; если μ̂ excess "
+        f"близок к π total — это эффект views, а не ошибка шкалы."
     )
+
+
+def validate_return_scales(
+    pi: np.ndarray,
+    mu_bl: np.ndarray,
+    rf: float,
+    w_mkt: np.ndarray,
+) -> dict[str, float]:
+    """Числовые проверки согласованности excess/total."""
+    pi_total = to_total(pi, rf)
+    mu_total = to_total(mu_bl, rf)
+    shift_ex = mu_bl - pi
+    shift_tot = mu_total - pi_total
+    return {
+        "market_excess_w_pi_pct": float(w_mkt @ pi * 100),
+        "pi_mean_excess_pct": float(pi.mean() * 100),
+        "pi_mean_total_pct": float(pi_total.mean() * 100),
+        "mu_mean_excess_pct": float(mu_bl.mean() * 100),
+        "mu_mean_total_pct": float(mu_total.mean() * 100),
+        "max_abs_shift_ex_minus_tot_pct": float(np.max(np.abs(shift_ex - shift_tot)) * 100),
+        "max_abs_mu_minus_pi_total_pct": float(np.max(np.abs(mu_bl - pi_total)) * 100),
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -230,10 +253,6 @@ def load_data() -> dict:
     corr_np = corr_df.values.astype(float)
 
     pred_df = pd.read_csv(DATA_DIR / "analyst_forecasts_2026_with_predictions.csv")
-    pred_df["q_excess"] = (
-        pred_df["potential_earn_rate_ann"] - pred_df["risk_free_rate_ann"]
-    )
-
     with open(DATA_DIR / "model_artifacts" / "metrics.json", "r", encoding="utf-8") as f:
         metrics = json.load(f)
 
@@ -316,6 +335,13 @@ with st.sidebar:
         f"**Rf (excess baseline):** {rf*100:.2f}%"
     )
 
+# Q для BL и отображения: excess относительно единого Rf из sidebar
+pred_df = pred_df.copy()
+pred_df["q_excess_row_rf"] = (
+    pred_df["potential_earn_rate_ann"] - pred_df["risk_free_rate_ann"]
+)
+pred_df["q_excess"] = pred_df["potential_earn_rate_ann"] - rf
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Предварительный расчет BL (кэшированный)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -324,13 +350,25 @@ def compute_bl(
     tickers_key: tuple,
     cov_bytes: bytes,
     w_bytes: bytes,
+    pred_bytes: bytes,
     delta_f: float,
     tau_f: float,
+    rf_f: float,
 ) -> BLResult:
     cov = pickle.loads(cov_bytes)
     w = pickle.loads(w_bytes)
-    views = build_ridge_views(list(tickers_key), cov, tau_f, pred_df, median_error=median_y_pred)
-    return run_black_litterman(list(tickers_key), cov, w, views, delta=delta_f, tau=tau_f, long_only=True)
+    pred_local = pickle.loads(pred_bytes)
+    views = build_ridge_views(
+        list(tickers_key),
+        cov,
+        tau_f,
+        pred_local,
+        median_error=median_y_pred,
+        rf=rf_f,
+    )
+    return run_black_litterman(
+        list(tickers_key), cov, w, views, delta=delta_f, tau=tau_f, long_only=True
+    )
 
 
 try:
@@ -338,8 +376,10 @@ try:
         tickers_key=tuple(tickers),
         cov_bytes=pickle.dumps(cov_np),
         w_bytes=pickle.dumps(w_mkt),
+        pred_bytes=pickle.dumps(pred_df),
         delta_f=float(delta),
         tau_f=float(tau),
+        rf_f=float(rf),
     )
 except Exception as exc:
     st.error(f"Ошибка расчета BL: {exc}")
@@ -604,13 +644,28 @@ st.caption(
 
 st.subheader("Прогнозы аналитиков (2026)")
 display_pred = pred_df[
-    ["create_dt", "ticker", "analyst_name", "potential_earn_rate_ann", "q_excess", "y_pred"]
+    [
+        "create_dt",
+        "ticker",
+        "analyst_name",
+        "potential_earn_rate_ann",
+        "q_excess",
+        "q_excess_row_rf",
+        "y_pred",
+    ]
 ].copy()
 display_pred["potential_earn_rate_ann"] = (display_pred["potential_earn_rate_ann"] * 100).round(1)
 display_pred["q_excess"] = (display_pred["q_excess"] * 100).round(1)
+display_pred["q_excess_row_rf"] = (display_pred["q_excess_row_rf"] * 100).round(1)
 display_pred["y_pred"] = (display_pred["y_pred"] * 100).round(1)
 display_pred.columns = [
-    "Дата", "Тикер", "Аналитик", "Total (%)", "Q excess (%)", "Предсказанная ошибка (%)",
+    "Дата",
+    "Тикер",
+    "Аналитик",
+    "Total (%)",
+    f"Q excess (Rf={rf*100:.1f}%)",
+    "Q excess (rf строки)",
+    "Предсказанная ошибка (%)",
 ]
 st.dataframe(display_pred, use_container_width=True, height=360, hide_index=True)
 
@@ -872,7 +927,9 @@ st.markdown("### Расчёт Ω в 5 шагов")
 if bl_result is not None and bl_result.views is not None:
     views = bl_result.views
 else:
-    views = build_ridge_views(tickers, cov_np, tau, pred_df, median_error=median_y_pred)
+    views = build_ridge_views(
+        tickers, cov_np, tau, pred_df, median_error=median_y_pred, rf=rf
+    )
 P, Q = views.P, views.Q
 baseline = tau * np.diag(P @ cov_np @ P.T)
 rel_err = pred_df["y_pred"].values[: views.k] / max(median_y_pred, 1e-8)
@@ -1018,20 +1075,19 @@ else:
 
     st.metric("Разница long-form vs short-form", f"{diff:.2e}", help="Должна быть << 1e-8")
 
-    tab_ex, tab_tot = st.tabs(["Excess (π, μ̂, Q)", "Total (excess + Rf)"])
+    checks = validate_return_scales(pi, mu_bl, rf, w_mkt)
+    v1, v2, v3, v4 = st.columns(4)
+    v1.metric("w·π (excess рынка)", f"{checks['market_excess_w_pi_pct']:.2f}%")
+    v2.metric("Средняя π excess", f"{checks['pi_mean_excess_pct']:.2f}%")
+    v3.metric("Средняя μ̂ excess", f"{checks['mu_mean_excess_pct']:.2f}%")
+    v4.metric("Средняя π total", f"{checks['pi_mean_total_pct']:.2f}%")
+    st.caption(
+        f"Проверка шкал: max|Δ_excess − Δ_total| = {checks['max_abs_shift_ex_minus_tot_pct']:.2e} п.п. "
+        f"(должно быть ≈ 0). μ̂ excess ≠ π total: "
+        f"средняя μ̂ total = {checks['mu_mean_total_pct']:.2f}%."
+    )
 
-    with tab_ex:
-        st.subheader("Сравнение excess-доходностей")
-        fig_ex = plot_bar_comparison(
-            tickers,
-            {
-                "π excess, %": np.round(pi * 100, 2),
-                "μ̂ excess, %": np.round(mu_bl * 100, 2),
-            },
-            "π vs μ̂ (excess)",
-            ytitle="Excess, % годовых",
-        )
-        st.plotly_chart(fig_ex, use_container_width=True)
+    tab_tot, tab_ex = st.tabs(["Total (excess + Rf)", "Excess (BL-формулы)"])
 
     with tab_tot:
         st.subheader("Сравнение total-доходностей")
@@ -1046,7 +1102,20 @@ else:
         )
         st.plotly_chart(fig_tot, use_container_width=True)
 
-    st.subheader("Сдвиг доходностей: μ̂ − π (excess)")
+    with tab_ex:
+        st.subheader("Сравнение excess-доходностей")
+        fig_ex = plot_bar_comparison(
+            tickers,
+            {
+                "π excess, %": np.round(pi * 100, 2),
+                "μ̂ excess, %": np.round(mu_bl * 100, 2),
+            },
+            "π vs μ̂ (excess)",
+            ytitle="Excess, % годовых",
+        )
+        st.plotly_chart(fig_ex, use_container_width=True)
+
+    st.subheader("Сдвиг доходностей: μ̂ − π")
     shift_excess = (mu_bl - pi) * 100
     shift_total = (mu_total - pi_total) * 100
     shift_df = pd.DataFrame(
@@ -1078,8 +1147,10 @@ else:
     st.plotly_chart(fig_shift, use_container_width=True)
     st.dataframe(shift_df, use_container_width=True, height=420, hide_index=True)
     st.caption(
-        "Δ total совпадает с Δ excess: (μ̂+Rf)−(π+Rf) = μ̂−π. "
-        "Ранее на графиках смешивались π total и μ̂ excess — это давало ложный «сдвиг»."
+        "Столбцы Δ excess и Δ total совпадают: (μ̂+Rf)−(π+Rf) = μ̂−π. "
+        "μ̂ excess может быть сопоставим по величине с π total (~"
+        f"{checks['pi_mean_total_pct']:.1f}% vs ~{checks['mu_mean_excess_pct']:.1f}%), "
+        "потому что views тянут μ̂ к Q excess ~24%, а не потому что в μ̂ «зашит» Rf."
     )
 
     # Проверка: posterior ближе к равновесию, чем сырой Q?
@@ -1104,7 +1175,7 @@ else:
 
     st.subheader("Карта риск–доходность")
     vols = np.sqrt(np.diag(cov_np)) * 100
-    rr_tab_ex, rr_tab_tot = st.tabs(["Excess", "Total (+ Rf)"])
+    rr_tab_tot, rr_tab_ex = st.tabs(["Total (+ Rf)", "Excess"])
     with rr_tab_ex:
         fig_rr_ex = go.Figure()
         fig_rr_ex.add_trace(

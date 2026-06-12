@@ -441,6 +441,8 @@ def build_ridge_views(
     tau: float,
     df_signals: "pd.DataFrame",
     median_error: float | None = None,
+    *,
+    rf: float | None = None,
 ) -> BLViews:
     """
     Строит BLViews из прогнозов Ridge-модели с корректным расчётом Omega.
@@ -463,6 +465,8 @@ def build_ridge_views(
     df_signals   : DataFrame с колонками ['ticker', 'potential_earn_rate_ann',
                    'risk_free_rate_ann', 'y_pred', 'analyst_name']
     median_error : медианная предсказанная ошибка по истории (если None — загрузит из артефактов)
+    rf           : единая безрисковая ставка для Q = total − Rf (как в π и Sharpe).
+                   Если None — используется risk_free_rate_ann из каждой строки.
 
     Returns
     -------
@@ -490,8 +494,8 @@ def build_ridge_views(
         p[idx[ticker]] = 1.0
 
         total_return = float(row["potential_earn_rate_ann"])
-        rf_row = float(row.get("risk_free_rate_ann", 0.0))
-        q = total_return - rf_row  # excess return — согласовано с π
+        rf_row = float(rf if rf is not None else row.get("risk_free_rate_ann", 0.0))
+        q = total_return - rf_row  # excess return — в одной шкале с π
         pred_err = float(row["y_pred"])
         analyst = str(row.get("analyst_name", "UNKNOWN"))
 

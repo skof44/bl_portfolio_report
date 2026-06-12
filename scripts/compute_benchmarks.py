@@ -96,11 +96,13 @@ def main() -> dict:
     pi = reverse_optimize(cov, w_mkt, DELTA)
 
     pred = pd.read_csv(DATA / "analyst_forecasts_2026_with_predictions.csv")
-    pred["q_excess"] = pred["potential_earn_rate_ann"] - pred["risk_free_rate_ann"]
+    pred["q_excess"] = pred["potential_earn_rate_ann"] - RF
     with open(DATA / "model_artifacts/metrics.json", encoding="utf-8") as f:
         ml_metrics = json.load(f)
 
-    views_ml = build_ridge_views(tickers, cov, TAU, pred, ml_metrics["median_y_pred"])
+    views_ml = build_ridge_views(
+        tickers, cov, TAU, pred, ml_metrics["median_y_pred"], rf=RF
+    )
     res_ml = run_black_litterman(tickers, cov, w_mkt, views_ml, delta=DELTA, tau=TAU)
 
     omega_hl = build_omega_proportional(views_ml.P, cov, TAU)
