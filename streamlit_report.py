@@ -101,10 +101,11 @@ def style_thesis_figure(fig: go.Figure, **layout) -> go.Figure:
     """Крупные подписи осей, легенды и меток — удобно для Word/PDF."""
     body = _chart_fs(12)
     tick = _chart_fs(11)
-    title = _chart_fs(14)
-    legend = _chart_fs(11)
+    title_fs = _chart_fs(14)
+    legend_fs = _chart_fs(11)
     hover = _chart_fs(11)
     heatmap_text = _chart_fs(10)
+    axis_title_font = dict(size=tick, family=_CHART_FONT_FAMILY)
 
     margin = layout.pop("margin", None) or {}
     margin = {
@@ -114,46 +115,67 @@ def style_thesis_figure(fig: go.Figure, **layout) -> go.Figure:
         "r": margin.get("r", _chart_fs(25)),
     }
 
-    legend_kw = layout.pop("legend", {}) or {}
-    legend_kw = {
-        **legend_kw,
-        "font": {
-            **(legend_kw.get("font") or {}),
-            "size": legend,
-            "family": _CHART_FONT_FAMILY,
-        },
-    }
+    showlegend = layout.get("showlegend", fig.layout.showlegend)
+    legend_kw = dict(layout.pop("legend", None) or {})
+    if showlegend is not False:
+        legend_font = dict(legend_kw.pop("font", None) or {})
+        legend_font.update(size=legend_fs, family=_CHART_FONT_FAMILY)
+        legend_kw["font"] = legend_font
+        # title_font / пустой title без text → «undefined» над легендой в Plotly.js
+        legend_kw["title"] = None
 
-    fig.update_layout(
-        font=dict(family=_CHART_FONT_FAMILY, size=body, color="#1a1a1a"),
-        title_font=dict(size=title, family=_CHART_FONT_FAMILY),
-        legend=legend_kw,
-        hoverlabel=dict(font_size=hover, font_family=_CHART_FONT_FAMILY),
-        margin=margin,
+    layout.pop("title_font", None)
+
+    layout_patch: dict = {
+        "font": dict(family=_CHART_FONT_FAMILY, size=body, color="#1a1a1a"),
+        "hoverlabel": dict(font_size=hover, font_family=_CHART_FONT_FAMILY),
+        "margin": margin,
         **layout,
-    )
-    fig.update_xaxes(
-        tickfont=dict(size=tick, family=_CHART_FONT_FAMILY),
-        title_font=dict(size=tick, family=_CHART_FONT_FAMILY),
-    )
-    fig.update_yaxes(
-        tickfont=dict(size=tick, family=_CHART_FONT_FAMILY),
-        title_font=dict(size=tick, family=_CHART_FONT_FAMILY),
-    )
+    }
+    if showlegend is not False:
+        layout_patch["legend"] = legend_kw
+
+    # title_font без title.text → «undefined» сверху графика (часто над горизонтальной легендой)
+    title_text = layout_patch.get("title")
+    if title_text is None and fig.layout.title is not None:
+        title_text = fig.layout.title.text
+    if isinstance(title_text, str) and title_text:
+        layout_patch["title"] = dict(
+            text=title_text,
+            font=dict(size=title_fs, family=_CHART_FONT_FAMILY),
+        )
+    elif isinstance(title_text, dict) and title_text.get("text"):
+        merged_title = dict(title_text)
+        title_font = dict(merged_title.pop("font", None) or {})
+        title_font.update(size=title_fs, family=_CHART_FONT_FAMILY)
+        merged_title["font"] = title_font
+        layout_patch["title"] = merged_title
+    else:
+        layout_patch["title"] = None
+
+    fig.update_layout(**layout_patch)
+
+    fig.update_xaxes(tickfont=dict(size=tick, family=_CHART_FONT_FAMILY))
+    fig.update_yaxes(tickfont=dict(size=tick, family=_CHART_FONT_FAMILY))
+    for axis_key in list(fig.layout):
+        if not (axis_key.startswith("xaxis") or axis_key.startswith("yaxis")):
+            continue
+        axis = fig.layout[axis_key]
+        axis_title = axis.title.text if axis.title is not None else None
+        if axis_title:
+            fig.update_layout({axis_key: {"title_font": axis_title_font}})
+
     try:
         fig.update_coloraxes(
             colorbar=dict(
                 tickfont=dict(size=tick, family=_CHART_FONT_FAMILY),
-                title_font=dict(size=tick, family=_CHART_FONT_FAMILY),
+                title=None,
             ),
         )
     except (ValueError, TypeError):
         pass
 
-    fig.update_traces(
-        textfont=dict(size=tick, family=_CHART_FONT_FAMILY),
-        textfont_size=tick,
-    )
+    fig.update_traces(textfont=dict(size=tick, family=_CHART_FONT_FAMILY))
 
     for trace in fig.data:
         marker = getattr(trace, "marker", None)
