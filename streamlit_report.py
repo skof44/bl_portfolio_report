@@ -194,6 +194,9 @@ def load_data() -> dict:
     corr_np = corr_df.values.astype(float)
 
     pred_df = pd.read_csv(DATA_DIR / "analyst_forecasts_2026_with_predictions.csv")
+    pred_df["q_excess"] = (
+        pred_df["potential_earn_rate_ann"] - pred_df["risk_free_rate_ann"]
+    )
 
     with open(DATA_DIR / "model_artifacts" / "metrics.json", "r", encoding="utf-8") as f:
         metrics = json.load(f)
@@ -219,6 +222,7 @@ cov_np = data["cov_np"]
 w_mkt = data["w_mkt"]
 pred_df = data["pred_df"]
 median_y_pred = data["median_y_pred"]
+ml_alpha = data["metrics"].get("best_alpha", 10.0)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Боковая панель: якорная навигация
@@ -437,7 +441,7 @@ with col1:
 
 with col2:
     st.markdown(
-        """
+        f"""
         <div class="section-card">
         <h4>Новизна данной работы</h4>
         <p>
@@ -454,7 +458,7 @@ with col2:
         <hr style="margin: 1rem 0; border: none; border-top: 1px solid rgba(128,128,128,0.25);">
         <p style="font-size: 0.9rem; opacity: 0.75;">
         <b>23 актива</b> портфеля MOEX · <b>65 прогнозов</b> аналитиков ·
-        <b>Ridge (α=10)</b> с One-Hot Encoding
+        <b>Ridge (α={ml_alpha:g})</b> с One-Hot Encoding · Q = excess return
         </p>
         </div>
         """,
@@ -562,10 +566,15 @@ st.caption(
 )
 
 st.subheader("Прогнозы аналитиков (2026)")
-display_pred = pred_df[["create_dt", "ticker", "analyst_name", "potential_earn_rate_ann", "y_pred"]].copy()
+display_pred = pred_df[
+    ["create_dt", "ticker", "analyst_name", "potential_earn_rate_ann", "q_excess", "y_pred"]
+].copy()
 display_pred["potential_earn_rate_ann"] = (display_pred["potential_earn_rate_ann"] * 100).round(1)
+display_pred["q_excess"] = (display_pred["q_excess"] * 100).round(1)
 display_pred["y_pred"] = (display_pred["y_pred"] * 100).round(1)
-display_pred.columns = ["Дата", "Тикер", "Аналитик", "Прогноз Q (%)", "Предсказанная ошибка (%)"]
+display_pred.columns = [
+    "Дата", "Тикер", "Аналитик", "Total (%)", "Q excess (%)", "Предсказанная ошибка (%)",
+]
 st.dataframe(display_pred, use_container_width=True, height=360, hide_index=True)
 
 c1, c2, c3, c4 = st.columns(4)
@@ -690,33 +699,33 @@ fig = px.bar(
 fig.update_layout(height=380, margin=dict(t=10, b=40), showlegend=False)
 st.plotly_chart(fig, use_container_width=True)
 
-st.subheader("Распределение прогнозов Q")
+st.subheader("Распределение прогнозов Q (excess)")
 fig2 = go.Figure()
 fig2.add_trace(
     go.Histogram(
-        x=pred_df["potential_earn_rate_ann"] * 100,
+        x=pred_df["q_excess"] * 100,
         nbinsx=20,
         marker_color="#2c5364",
         opacity=0.8,
     )
 )
 fig2.add_vline(
-    x=float(pred_df["potential_earn_rate_ann"].mean() * 100),
+    x=float(pred_df["q_excess"].mean() * 100),
     line_dash="dash",
     line_color="red",
-    annotation_text=f"μ = {pred_df['potential_earn_rate_ann'].mean()*100:.1f}%",
+    annotation_text=f"μ = {pred_df['q_excess'].mean()*100:.1f}%",
 )
-fig2.update_layout(height=320, margin=dict(t=10, b=40), xaxis_title="Q, % годовых")
+fig2.update_layout(height=320, margin=dict(t=10, b=40), xaxis_title="Q excess, % годовых")
 st.plotly_chart(fig2, use_container_width=True)
 
 st.markdown(
     f"""
     <div class="insight-box">
     <b>Интерпретация:</b><br>
-    • Средний прогноз аналитиков: <b>{pred_df['potential_earn_rate_ann'].mean()*100:.1f}%</b> годовых<br>
-    • Медианный прогноз: <b>{pred_df['potential_earn_rate_ann'].median()*100:.1f}%</b><br>
-    • Максимальный: <b>{pred_df['potential_earn_rate_ann'].max()*100:.1f}%</b> ({pred_df.loc[pred_df['potential_earn_rate_ann'].idxmax(), 'ticker']} / {pred_df.loc[pred_df['potential_earn_rate_ann'].idxmax(), 'analyst_name']})<br>
-    • Минимальный: <b>{pred_df['potential_earn_rate_ann'].min()*100:.1f}%</b>
+    • Средний Q (excess): <b>{pred_df['q_excess'].mean()*100:.1f}%</b> · total: <b>{pred_df['potential_earn_rate_ann'].mean()*100:.1f}%</b><br>
+    • Медианный Q (excess): <b>{pred_df['q_excess'].median()*100:.1f}%</b><br>
+    • Максимальный excess: <b>{pred_df['q_excess'].max()*100:.1f}%</b> ({pred_df.loc[pred_df['q_excess'].idxmax(), 'ticker']} / {pred_df.loc[pred_df['q_excess'].idxmax(), 'analyst_name']})<br>
+    • Минимальный excess: <b>{pred_df['q_excess'].min()*100:.1f}%</b>
     </div>
     """,
     unsafe_allow_html=True,
@@ -749,7 +758,7 @@ st.markdown(
     <div class="section-card">
     <h4>Данные и постановка задачи</h4>
     <p>
-    Для обучения использовался исторический датасет <b>signal_features_true.xlsx</b> —
+    Для обучения использовался исторический датасет <b>SIGNALS_DATA.xlsx</b> —
     {data['metrics']['n_train'] + data['metrics']['n_test']} закрытых рекомендаций аналитиков с известной фактической доходностью.
     Каждая строка — это один прогноз (signal), содержащий дату создания, тикер, аналитика,
     целевую цену, фактическую цену закрытия и макропараметры.
@@ -767,7 +776,7 @@ target_y = |fact_earn_rate_ann − potential_earn_rate_ann|
     </ul>
     <p><b>Предобработка:</b></p>
     <ul>
-        <li>Удалены {data['metrics'].get('n_removed_zero', 'некоторое число')} сигналов с target_y = 0
+        <li>Удалены {data['metrics'].get('n_removed_zero_target', data['metrics'].get('n_removed_zero', '—'))} сигналов с target_y = 0
             (некорректные данные: идеальное совпадение fact и potential)</li>
         <li>Нормализация названий аналитиков (объединены дубли: «Сбер Инвестиции» → «Сбер», и т.д.)</li>
         <li>Тикеры: топ-30 по частоте + категория «rare_ticker» для остальных</li>
@@ -783,14 +792,14 @@ st.markdown(
     <div class="section-card">
     <h4>Модель и процедура обучения</h4>
     <p>
-    В качестве базового алгоритма выбрана <b>Ridge-регрессия</b> (L2-регуляризация, α = 10).
-    Выбор обусловлен небольшим числом признаков и необходимостью получать
-    устойчивые предсказания без переобучения на категориальных One-Hot признаках.
+    В качестве базового алгоритма выбрана <b>Ridge-регрессия</b> (L2-регуляризация).
+    Параметр α подбирается по <b>TimeSeriesSplit</b> на обучающей выборке
+    (лучшее значение: <b>α = {ml_alpha:g}</b>).
     </p>
     <ul>
         <li><b>Pipeline:</b> ColumnTransformer (StandardScaler + OHE) → RidgeRegressor</li>
-        <li><b>Разбиение:</b> хронологическое 80/20 по дате создания сигнала (create_dt),
-            а не случайное — это имитирует реальное применение модели «в будущее»</li>
+        <li><b>Разбиение:</b> хронологическое 80/20 по create_dt (train: {data['metrics'].get('train_period', {}).get('start', '—')} … {data['metrics'].get('train_period', {}).get('end', '—')})</li>
+        <li><b>Тест:</b> {data['metrics'].get('test_period', {}).get('start', '—')} … {data['metrics'].get('test_period', {}).get('end', '—')}</li>
         <li><b>Случайное состояние:</b> random_state = 42 (детерминированность)</li>
     </ul>
     </div>
@@ -800,10 +809,13 @@ st.markdown(
 
 m = data["metrics"]
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Train MAE", f"{m['train_metrics']['MAE']:.4f}")
-c2.metric("Test MAE", f"{m['test_metrics']['MAE']:.4f}")
+_train_mae = m["train_metrics"].get("MAE_%", m["train_metrics"]["MAE"] * 100)
+_test_mae = m["test_metrics"].get("MAE_%", m["test_metrics"]["MAE"] * 100)
+_test_medae = m["test_metrics"].get("MedAE_%", m["test_metrics"].get("MedAE", 0) * 100)
+c1.metric("Train MAE", f"{_train_mae:.2f}%")
+c2.metric("Test MAE", f"{_test_mae:.2f}%")
 c3.metric("Test R²", f"{m['test_metrics']['R2']:.3f}")
-c4.metric("Test RMSE", f"{m['test_metrics']['RMSE']:.4f}")
+c4.metric("Test MedAE", f"{_test_medae:.2f}%")
 
 st.markdown("---")
 st.markdown("### Расчёт Ω в 5 шагов")
@@ -1172,37 +1184,66 @@ else:
         st.plotly_chart(fig_pie_bl, use_container_width=True)
 
     st.markdown("---")
-    st.subheader("Сравнение портфелей")
+    st.subheader("Сравнение портфелей (ex-ante)")
 
-    comparison = pd.DataFrame(
-        {
-            "Метрика": ["Ожидаемая доходность, %", "Волатильность, %", "Sharpe ratio", "Max вес, %", "Активов с w>0"],
-            "BL-портфель": [
-                f"{mu_p*100:.2f}",
-                f"{sigma_p*100:.2f}",
-                f"{sharpe_bl:.3f}",
-                f"{weights_bl.max()*100:.1f}",
-                f"{(weights_bl > 0.001).sum()}",
-            ],
-            "Рыночный портфель": [
-                f"{mu_p_mkt*100:.2f}",
-                f"{sigma_p_mkt*100:.2f}",
-                f"{sharpe_mkt:.3f}",
-                f"{weights_mkt.max()*100:.1f}",
-                f"{n}",
-            ],
-        }
-    )
-    st.dataframe(comparison, use_container_width=True, hide_index=True)
+    benchmarks_path = DATA_DIR / "model_artifacts" / "benchmarks.json"
+    if benchmarks_path.exists():
+        with open(benchmarks_path, encoding="utf-8") as f:
+            bench = json.load(f)
+        bench_df = pd.DataFrame(bench["benchmarks"]).set_index("portfolio").T
+        bench_df.index = [
+            "Изб. доходность, %",
+            "Волатильность, %",
+            "Sharpe",
+            "Sortino",
+            "HHI",
+            "Tracking Error, %",
+            "Turnover vs рынок",
+            "Max вес, %",
+            "Активов с w>0",
+        ]
+        st.dataframe(bench_df, use_container_width=True)
+        st.caption(
+            "Полная таблица: `python scripts/compute_benchmarks.py` · "
+            "см. docs/thesis-tables.md"
+        )
+    else:
+        comparison = pd.DataFrame(
+            {
+                "Метрика": [
+                    "Ожидаемая доходность, %",
+                    "Волатильность, %",
+                    "Sharpe ratio",
+                    "Max вес, %",
+                    "Активов с w>0",
+                ],
+                "BL-портфель": [
+                    f"{mu_p*100:.2f}",
+                    f"{sigma_p*100:.2f}",
+                    f"{sharpe_bl:.3f}",
+                    f"{weights_bl.max()*100:.1f}",
+                    f"{(weights_bl > 0.001).sum()}",
+                ],
+                "Рыночный портфель": [
+                    f"{mu_p_mkt*100:.2f}",
+                    f"{sigma_p_mkt*100:.2f}",
+                    f"{sharpe_mkt:.3f}",
+                    f"{weights_mkt.max()*100:.1f}",
+                    f"{n}",
+                ],
+            }
+        )
+        st.dataframe(comparison, use_container_width=True, hide_index=True)
 
+    max_ticker = tickers[int(weights_bl.argmax())]
     st.markdown(
         f"""
         <div class="insight-box">
-        <b>Выводы:</b><br>
-        • BL-портфель демонстрирует Sharpe = <b>{sharpe_bl:.3f}</b> против <b>{sharpe_mkt:.3f}</b> у рынка.<br>
-        • Tracking Error = <b>{te*100:.2f}%</b> — умеренное отклонение от бенчмарка.<br>
-        • Максимальный вес = <b>{weights_bl.max()*100:.1f}%</b> (SBER) — концентрация в пределах разумного.<br>
-        • {(weights_bl > 0.001).sum()} из {n} активов получают ненулевой вес — хорошая диверсификация.
+        <b>Выводы (ex-ante):</b><br>
+        • BL+ML: Sharpe = <b>{sharpe_bl:.3f}</b> vs рынок <b>{sharpe_mkt:.3f}</b>.<br>
+        • Tracking Error = <b>{te*100:.2f}%</b> · HHI = <b>{float(np.sum(weights_bl**2)):.3f}</b>.<br>
+        • Макс. вес = <b>{weights_bl.max()*100:.1f}%</b> ({max_ticker}) · активов: <b>{(weights_bl > 0.001).sum()}/{n}</b>.<br>
+        • ML-Ω снижает концентрацию и TE относительно BL base, но Sharpe ниже базовой BL.
         </div>
         """,
         unsafe_allow_html=True,

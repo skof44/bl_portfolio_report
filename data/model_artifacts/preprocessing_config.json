@@ -1,0 +1,34 @@
+{
+  "top_tickers": [
+    "SBER",
+    "AFLT",
+    "LKOH",
+    "MTSS",
+    "CHMF",
+    "RTKM",
+    "MOEX",
+    "TATN",
+    "NVTK",
+    "PHOR",
+    "ROSN",
+    "TRNFP",
+    "GAZP",
+    "IRAO",
+    "GMKN",
+    "ALRS",
+    "MAGN",
+    "SNGS",
+    "VTBR",
+    "RUAL",
+    "NLMK",
+    "PLZL",
+    "PIKK"
+  ],
+  "analyst_map": {
+    "ЦИFРА брокер": "Цифра Брокер",
+    "Сбер Инвестиции": "Сбер",
+    "SberCIB": "Сбер",
+    "Т-Инвестиций": "Тинькофф Инвестиции"
+  },
+  "top_n_tickers": 30
+}

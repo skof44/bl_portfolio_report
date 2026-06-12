@@ -267,7 +267,7 @@ def run_black_litterman(
     mu_bl, cov_bl = master_formula(pi, cov, views, tau)
     logger.info("μ̂: %s", dict(zip(tickers_t, np.round(mu_bl, 4))))
 
-    weights_bl = compute_bl_weights(mu_bl, cov, delta, normalize=True, long_only=long_only)
+    weights_bl = compute_bl_weights(mu_bl, cov_bl, delta, normalize=True, long_only=long_only)
     logger.info("w*: %s", dict(zip(tickers_t, np.round(weights_bl, 4))))
 
     return BLResult(
@@ -460,7 +460,8 @@ def build_ridge_views(
     tickers      : имена активов в портфеле (n штук)
     cov          : годовая ковариационная матрица (n × n)
     tau          : масштаб неопределённости prior
-    df_signals   : DataFrame с колонками ['ticker', 'potential_earn_rate_ann', 'y_pred', 'analyst_name']
+    df_signals   : DataFrame с колонками ['ticker', 'potential_earn_rate_ann',
+                   'risk_free_rate_ann', 'y_pred', 'analyst_name']
     median_error : медианная предсказанная ошибка по истории (если None — загрузит из артефактов)
 
     Returns
@@ -488,14 +489,19 @@ def build_ridge_views(
         p = np.zeros(n)
         p[idx[ticker]] = 1.0
 
-        q = float(row["potential_earn_rate_ann"])
+        total_return = float(row["potential_earn_rate_ann"])
+        rf_row = float(row.get("risk_free_rate_ann", 0.0))
+        q = total_return - rf_row  # excess return — согласовано с π
         pred_err = float(row["y_pred"])
         analyst = str(row.get("analyst_name", "UNKNOWN"))
 
         rows_P.append(p)
         rows_Q.append(q)
         rows_pred_err.append(pred_err)
-        names.append(f"{ticker} ({analyst}): прогноз {q:.1%} (ошибка модели {pred_err:.1%})")
+        names.append(
+            f"{ticker} ({analyst}): excess {q:.1%} "
+            f"(total {total_return:.1%}, σ̂_err {pred_err:.1%})"
+        )
 
     if not rows_P:
         raise RuntimeError(
